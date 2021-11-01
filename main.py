@@ -1,5 +1,7 @@
 from kivy.lang.builder import Builder
 from kivy.uix.boxlayout import BoxLayout
+from kivymd.uix.relativelayout import MDRelativeLayout
+from kivy.utils import QueryDict
 from kivymd.app import MDApp
 from kivy.uix.screenmanager import Screen,ScreenManager
 from kivy.core.window import Window
@@ -8,32 +10,30 @@ from kivymd.uix.button import MDIconButton
 from kivy.uix.button import Button
 from kivy.graphics import Color, Rectangle
 from kivy.graphics.texture import Texture
-from kivy.properties import StringProperty, NumericProperty
+from kivy.properties import StringProperty, ObjectProperty
 import connection as conn
 from kivy.uix.image import Image
+import kivy.uix.settings as settings
 from kivy.clock import Clock
 from kivy.uix.widget import Widget
 from kivymd.uix.menu import MDDropdownMenu
-import pyaudio
-import wave
-import threading
-import subprocess
-
-
-import time, cv2 as cv
-import os
-from kivy.config import Config
+from kivy.uix.popup import Popup
+import pyaudio, wave, threading, subprocess, time, cv2 as cv, os
+import requests, json
+from kivy.config import Config, ConfigParser
+from kivy.storage.jsonstore import JsonStore
 Config.set('graphics', 'maxfps', 0)
-
-
 
 Window.size = (300, 500)
 
 
 screen_helper="""
-ScreenManager:
+<AppScreen>:
     LoginPage:
+    RegistrationPage:
     MainPage:
+AppScreen:
+
 <SearchWidget@Screen>:
     MDTextField:
         hint_text: "Enter username"
@@ -43,32 +43,73 @@ ScreenManager:
         size_hint_x: 0.9
 
 <CameraClick>:
-    orientation: 'vertical'
-    Camera:
-        id: camera
-        resolution: (640, 480)
-    BoxLayout:
-        orientation: "horizontal"
-        MDFloatingActionButton:
+    FloatLayout:
+        Camera:
+            id: camera
+            resolution: (640, 480)
+            size: root.width, root.height
+        MDIconButton:
             icon: "camera"
+            pos_hint: {"center_x":0.3, "center_y":0.1}
             on_press: root.capture()
         MDFloatingActionButton:
-            icon: "incognito"
+            icon: "record"
+            pos_hint: {"center_x":0.7, "center_y":0.1}
+
+
+<PasswordTextField>:
+    size_hint_y: None
+    height: password.height
+
+    MDTextFieldRound:
+        id: password
+        hint_text: "Password"
+        password: True
+        text: ""
+        color_active: app.theme_cls.primary_light
+        padding:
+            self._lbl_icon_left.texture_size[1] + dp(10) if self.icon_left else dp(15), (self.height / 2) - (self.line_height / 2), self._lbl_icon_right.texture_size[1] + dp(20), 0
+        multiline: False
+        on_text_validate:
+            app.root.get_screen("login_page").on_text_validate(self)
+            app.root.get_screen("login_page").verify_credentials()
+        on_focus: app.root.get_screen("login_page").remove_errorMessage_on_focus() if self.focus else ""
+
+    MDIconButton:
+        icon: "eye-off"
+        ripple_scale: .5
+        pos_hint: {"center_y": .5}
+        pos: password.width - self.width + dp(8), 0
+        on_release:
+            self.icon = "eye" if self.icon == "eye-off" else "eye-off"
+            password.password = False if password.password is True else True
+
+# themes, background, etc.
+# <ConfigDropdown>:
+
+<SettingsPage>:
+    name: "user_settings"
 
 <LoginPage>:
     name: "login_page"
+    BoxLayout:
+        orientation: "vertical"
+        MDToolbar:
+            title: "P R E S E N D"
+            elevation: 20
+        Widget:
+
     MDCard:
         size_hint: None, None
-        size: 300, 400
-        pos_hint: {"center_x": 0.5, "center_y": 0.5}
+        size: 300, 415
+        pos_hint: {"center_x": 0.5, "center_y": 0.45}
         elevation: 10
         padding: 25
         spacing: 25
         orientation: 'vertical'
 
         MDLabel:
-            id: welcome_label
-            text: "WELCOME"
+            text: "Login"
             font_size: 40
             halign: 'center'
             size_hint_y: None
@@ -77,7 +118,91 @@ ScreenManager:
 
         MDTextFieldRound:
             id: user
-            hint_text: "username"
+            hint_text: "Username"
+            icon_right: "account"
+            color_active: app.theme_cls.primary_light
+            size_hint_x: None
+            width: 200
+            font_size: 18
+            pos_hint: {"center_x": 0.5}
+            multiline: False
+            on_text_validate: root.change_focus(self, password)
+            on_focus: root.remove_errorMessage_on_focus() if self.focus else ""
+
+
+        PasswordTextField:
+            id: password
+            size_hint_x: None
+            width: 200
+            text: root.password
+            font_size: 18
+            pos_hint: {"center_x": 0.5}
+
+        MDLabel:
+            id: errorMessage
+            text: ""
+            theme_text_color: "Custom"
+            text_color: 1, 0, 0
+
+        MDRoundFlatButton:
+            text: "Log In"
+            font_size: 12
+            pos_hint: {"center_x": 0.5}
+            on_press:
+                root.on_password(self, password)
+                root.verify_credentials()
+
+        MDRoundFlatButton:
+            text: "Register"
+            font_size: 12
+            pos_hint: {"center_x": 0.5}
+            on_release:
+                root.manager.transition.direction = "left"
+                root.manager.current = "register"
+        Widget:
+            size_hint_y: None
+            height: 10
+    MDBottomAppBar:
+        MDToolbar:
+            text_color: "black"
+            type: "bottom"
+            icon: "wrench"
+            mode: "free-end"
+            on_action_button: app.menu(self)
+
+
+<RegistrationPage>:
+    name: "register"
+    MDCard:
+        size_hint: None, None
+        size: 300, 450
+        pos_hint: {"center_x": 0.5, "center_y": 0.5}
+        elevation: 10
+        padding: 15
+        spacing: 25
+        orientation: 'vertical'
+
+        MDLabel:
+            id: registration_label
+            text: "Register"
+            font_size: 40
+            halign: 'center'
+            size_hint_y: None
+            height: self.texture_size[1]
+            padding_y: 15
+
+        MDTextFieldRound:
+            id: name
+            hint_text: "First Name"
+            icon_right: "label"
+            size_hint_x: None
+            width: 200
+            font_size: 18
+            pos_hint: {"center_x": 0.5}
+
+        MDTextFieldRound:
+            id: username
+            hint_text: "Username"
             icon_right: "account"
             size_hint_x: None
             width: 200
@@ -85,9 +210,26 @@ ScreenManager:
             pos_hint: {"center_x": 0.5}
 
         MDTextFieldRound:
+            id: email
+            hint_text: "Email"
+            icon_right: "email"
+            size_hint_x: None
+            width: 200
+            font_size: 18
+            pos_hint: {"center_x": 0.5}
+
+        MDTextFieldRound:
             id: password
-            hint_text: "password"
-            icon_right: "eye-off"
+            hint_text: "Password"
+            size_hint_x: None
+            width: 200
+            font_size: 18
+            pos_hint: {"center_x": 0.5}
+            password: True
+
+        MDTextFieldRound:
+            id: confirm_password
+            hint_text: "Confirm Password"
             size_hint_x: None
             width: 200
             font_size: 18
@@ -95,21 +237,22 @@ ScreenManager:
             password: True
 
         MDRoundFlatButton:
-            text: "LOG IN"
+            text: "Register"
             font_size: 12
             pos_hint: {"center_x": 0.5}
-            on_press: root.verify_credentials()
+            on_press: root.register()
 
-        MDRoundFlatButton:
-            text: "CLEAR"
-            font_size: 12
+        MDIconButton:
+            icon: "arrow-left"
+            font_size: 8
             pos_hint: {"center_x": 0.5}
-            on_press: app.clear()
+            on_release:
+                root.manager.transition.direction = "right"
+                root.manager.current = "login_page"
 
         Widget:
             size_hint_y: None
             height: 10
-
 <MainPage>:
     name: "main_page"
     BoxLayout:
@@ -140,7 +283,7 @@ ScreenManager:
                     max: 2
                     step: 1
                     value: 1
-                    pos_hint: {"center_x": 0.1, "center_y": 0.6}
+                    pos_hint: {"center_x": 0.1, "center_y": 0.5}
                     size_hint: 0.5, 0.5
 
             MDBottomNavigationItem:
@@ -167,11 +310,11 @@ ScreenManager:
                                 source: "galaxy/images/bg1.jpg"
                                 angle_start: 0
                                 angle_end: 360
-                        # MDIconButton:
-                        #     id: settings
-                        #     icon: "account-settings"
-                        #     pos_hint: {"center_x": 0.93, "center_y": 0.8}
-                        #     on_press: root.drop()
+                        MDIconButton:
+                            id: settings
+                            icon: "cog"
+                            pos_hint: {"center_x": 0.93, "center_y": 0.8}
+                            on_press: root.manager.current = "user_settings"
 
                     BoxLayout:
                         orientation: "horizontal"
@@ -202,11 +345,96 @@ class MainPage(Screen):
 
     # def drop(self):
     #     self.dropdown.open()
+
+class AppScreen(ScreenManager):
+    pass
+class ConfigDropdown(BoxLayout):
+    pass
+
+
+class PasswordTextField(MDRelativeLayout):
+    pass
 class LoginPage(Screen):
+    password = StringProperty()
+    # session = requests.Session()
+    loginObj = ObjectProperty()
+    # store = JsonStore('storage.json')
     def verify_credentials(self):
-        #check if loggedIn is yes from database
-        if self.ids["user"].text == "user" and self.ids["password"].text == "pass":
-            self.manager.current = "main_page"
+
+        #method to receive array of usernames and passwords
+        if self.ids.user.text == "" or self.password == "":
+            self.ids.errorMessage.text = "Please Fill in All of the Text Fields"
+        else:
+            # self.session.auth(self.ids.user.text, self.password)
+            mycursor = conn.db.cursor()
+            sql = "SELECT * FROM users WHERE username = %s AND password = %s"
+            val = (self.ids.user.text, self.password)
+            mycursor.execute(sql, val)
+            if len(mycursor.fetchall()) > 0:
+                self.get()
+                self.manager.current = "main_page"
+            else:
+                self.ids.errorMessage.text = "Username or Password is Incorrect"
+                self.ids.user.text = ""
+                self.ids.password.ids.password.text = ""
+
+    def on_text_validate(self, widget):
+        self.password = widget.text
+
+    def on_password(self, widget,val):
+        self.password = self.ids.password.ids.password.text
+
+    def change_focus(self, widget, val):
+        self.ids.password.ids.password.focus = True
+
+    def remove_errorMessage_on_focus(self):
+        self.ids.errorMessage.text = ""
+
+    def get(self):
+        username = {"username": self.ids.user.text}
+        password = {"password": self.password_encoder(self.password)}
+        data = [username, password]
+        with open("user.json", "w") as write_file:
+            json.dump(data, write_file)
+        self.loginObj = data
+
+    def password_encoder(self, word):
+        coded_word = ""
+        counter = 1
+        for i in word:
+            res = ord(i)
+            res += counter
+            coded_word += chr(res)
+            counter += 1
+        return coded_word
+
+    def password_decoder(self, word):
+        decoded_word = ""
+        counter = 1
+        for i in word:
+            res = ord(i)
+            res -= counter
+            decoded_word += chr(res)
+            counter += 1
+        return decoded_word
+
+
+class RegistrationPage(Screen):
+    mycursor = conn.db.cursor()
+    def register(self):
+        sql = "INSERT INTO users (first_name, username, email, password) VALUES (%s, %s, %s, %s)"
+        val = (self.ids.name.text, self.ids.username.text, self.ids.email.text, self.ids.password.text)
+        self.mycursor.execute(sql, val)
+        conn.db.commit()
+        self.login()
+
+        #login user
+    def login(self):
+        data = [self.ids.username.text, self.ids.password.text]
+        with open("user.json", "w") as write_file:
+            json.dump(data, write_file)
+        self.manager.current = "main_page"
+
 
 class CameraClick(BoxLayout):
     def capture(self):
@@ -427,18 +655,13 @@ class PresendApp(MDApp):
         self.theme_cls.primary_palette = "Red"
         screen = Builder.load_string(screen_helper)
         return screen
-
-    def logger(self):
-	    self.root.ids.welcome_label.text = f'Sup {self.root.ids.user.text}!'
-
-    def clear(self):
-	    self.root.ids.welcome_label.text = "WELCOME"
-	    self.root.ids.user.text = ""
-	    self.root.ids.password.text = ""
-
-
-    #def submit:
-        #saves info to user
+    def on_start(self):
+        #logout will just clear the list by doing list.clear()
+        userData = json.load(open("user.json"))
+        if userData != []:
+            self.root.current = "main_page"
+    def menu(self, widget):
+        print(widget)
 #The variable __name__ for the file/module that is run will be always __main__(i.e., main.py)
 #But the __name__ variable for all other modules that are being imported will be set to their module's name.
 
